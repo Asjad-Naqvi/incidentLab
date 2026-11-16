@@ -1,0 +1,9 @@
+{
+  "name": "@incidentlab/node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./index.mjs",
+  "files": ["index.mjs", "telemetry.mjs", "README.md"],
+  "engines": { "node": ">=22.14.0" }
+}
