@@ -12,6 +12,7 @@ import { processNextJob } from '../lib/worker.mjs';
 import { createApp } from '../server.mjs';
 import { projectRoot } from '../lib/config.mjs';
 import { createServer as createNetServer } from 'node:net';
+import { createAnalysisService, ANALYSIS_MODEL } from '../lib/analysis.mjs';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 const event = (extra = {}) => normalizeEvent({ id: randomUUID(), service: 'orders', method: 'POST',
@@ -26,29 +27,30 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
   const pool = postgresPool(connectionString, { options });
   const store = createPostgresStore(pool);
   t.after(async () => { await store.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); });
-  const reset = () => pool.query('TRUNCATE replays,events,incidents,ingestion_jobs');
+  const reset = () => pool.query('TRUNCATE incident_analyses,replays,events,incidents,ingestion_jobs');
+  const migrationFiles = ['001_core.sql','002_ingestion_queue.sql','003_incident_analysis.sql'];
 
   await t.test('versioned migrations serialize concurrent runners and detect changed history', async () => {
     const applied = await Promise.all([migratePostgres(pool), migratePostgres(pool)]);
-    assert.equal(applied.flat().length, 2);
+    assert.equal(applied.flat().length, 3);
     assert.deepEqual(await migratePostgres(pool), []);
     const directory = await mkdtemp(join(tmpdir(), 'incidentlab-migrations-'));
     try {
-      for (const name of ['001_core.sql', '002_ingestion_queue.sql']) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
+      for (const name of migrationFiles) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
       await writeFile(join(directory, '001_core.sql'), '-- tampered history');
       await assert.rejects(migratePostgres(pool, directory), /history mismatch/);
-      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 2);
+      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 3);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
   await t.test('failed migration rolls back all pending DDL and migration records', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'incidentlab-migration-failure-'));
     try {
-      for (const name of ['001_core.sql', '002_ingestion_queue.sql']) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
-      await writeFile(join(directory, '003_bad.sql'), 'CREATE TABLE should_rollback (id INT); SELECT nonexistent_column;');
+      for (const name of migrationFiles) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
+      await writeFile(join(directory, '004_bad.sql'), 'CREATE TABLE should_rollback (id INT); SELECT nonexistent_column;');
       await assert.rejects(migratePostgres(pool, directory));
       assert.equal((await pool.query("SELECT to_regclass('should_rollback') AS name")).rows[0].name, null);
-      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 2);
+      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 3);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
@@ -205,5 +207,49 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
     }
     await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(500) }));
     await assert.rejects(fetch(`http://127.0.0.1:${samplePort}/healthz`, { signal: AbortSignal.timeout(500) }));
+  });
+
+  await t.test('analysis reservations serialize across collectors and enforce a shared daily budget', async () => {
+    await reset();
+    const recorded = await store.record(event());
+    const input = { incidentId: recorded.incidentId,baseKey: 'shared-analysis',evidenceHash: 'hash',evidence: { evidence: [] },
+      model: ANALYSIS_MODEL,reservedMicros: 1000,dailyMicros: 1000,day: '2026-01-01' };
+    const other = createPostgresStore(postgresPool(connectionString,{ options }));
+    try {
+      const reservations = await Promise.all([store.reserveAnalysis(input),other.reserveAnalysis(input)]);
+      assert.equal(reservations.filter(r => r.created).length,1);
+      assert.equal(reservations[0].analysis.id,reservations[1].analysis.id);
+      await assert.rejects(other.reserveAnalysis({ ...input,baseKey: 'different-evidence' }),/Daily analysis budget/);
+      const id = reservations[0].analysis.id;
+      await pool.query('UPDATE incident_analyses SET created_at=$1 WHERE id=$2',['2026-01-01T00:00:00.000Z',id]);
+      await other.expireAnalyses();
+      assert.equal((await store.analysisByKey(input.baseKey)).error_code,'interrupted');
+      assert.equal(await store.analysisSpend(input.day),1000,'interrupted calls keep their reservation');
+    } finally { await other.close(); }
+  });
+
+  await t.test('validated AI results, usage and evidence persist across PostgreSQL connections without a second provider call', async () => {
+    await reset();
+    const recorded = await store.record(event());
+    const item = await store.incident(recorded.incidentId);
+    let calls = 0;
+    const env = { INCIDENTLAB_AI_ENABLED: '1', OPENAI_API_KEY: 'test-only-openai-key' };
+    const service = createAnalysisService(store,{ env,fetchImpl: async () => {
+      calls++;
+      const result = { summary: { text: 'Captured requests failed.',evidenceIds: ['E01'] },
+        hypotheses: [{ cause: 'A downstream dependency may have timed out.',confidence: 'low',evidenceIds: ['E01'],validation: 'Compare application and dependency logs.' }],
+        nextSteps: [{ action: 'Inspect timeout handling for this route.',evidenceIds: ['E01'] }],missingEvidence: ['Application logs and source code.'] };
+      return new Response(JSON.stringify({ status: 'completed',usage: { input_tokens: 100,output_tokens: 200 },
+        output: [{ type: 'message',content: [{ type: 'output_text',text: JSON.stringify(result) }] }] }));
+    } });
+    const generated = await service.analyze(item);
+    assert.equal(generated.analysis.status,'succeeded');
+    const other = createPostgresStore(postgresPool(connectionString,{ options }));
+    try {
+      const cached = await createAnalysisService(other,{ env,fetchImpl: () => { throw new Error('must use saved analysis'); } }).analyze(item);
+      assert.equal(cached.cached,true); assert.equal(cached.analysis.id,generated.analysis.id);
+      assert.equal(cached.analysis.evidence.evidence[0].eventId,item.events[0].id);
+      assert.equal(cached.analysis.usage.outputTokens,200); assert.equal(calls,1);
+    } finally { await other.close(); }
   });
 });

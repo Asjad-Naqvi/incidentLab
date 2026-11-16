@@ -46,6 +46,8 @@ Node 22's built-in SQLite module is experimental; the scripts explicitly enable 
 - `lib/open-store.mjs`: selects PostgreSQL using `DATABASE_URL`, otherwise SQLite.
 - `lib/postgres-store.mjs`: asynchronous PostgreSQL storage adapter and transactional queue operations.
 - `migrations/postgres/`: ordered SQL migrations with a checksum-verified migration history.
+- `lib/analysis.mjs`: bounded evidence snapshots, OpenAI structured responses, validation and analysis orchestration.
+- `lib/analysis-storage.mjs`: durable analysis caching and budget reservations for both databases.
 - `public/`: responsive, accessible dashboard with search, status filters, an investigation drawer, and replay history.
 - `test/`: end-to-end HTTP workflow, recurrence, input handling, and durable-storage checks.
 
@@ -66,6 +68,9 @@ Only original captured traffic contributes to live metrics. Replays are stored s
 | POST | `/api/incidents/:id/resolve` | Resolve after successful fixed replay evidence |
 | POST | `/api/v1/events` | Authenticated, validated telemetry batch; returns 202 after durable enqueue |
 | GET | `/healthz` | Collector liveness |
+| GET | `/api/incidents/:id/analysis` | Saved analysis, evidence snapshot and budget/configuration status; no provider request |
+| POST | `/api/incidents/:id/analysis` | Analyze the current snapshot, or return its cached result |
+| POST | `/api/incidents/:id/analysis?retry=1` | Explicitly retry a failed snapshot, with another budget reservation |
 
 ## External service milestone (v0.2)
 
@@ -150,7 +155,35 @@ Alternatively set `TEST_DATABASE_URL` to an existing **test** database. The suit
 
 This is a single-user **local prototype**, bound to `127.0.0.1`. Do not expose it publicly. The ingestion API uses a bearer key; dashboard reads and fixture controls have no user authentication or multi-tenant isolation. Mutation requests with a foreign Origin are rejected; this is not a substitute for production authentication. SDK payloads are explicitly opted in and redacted, but redaction is not a guarantee against every sensitive value. Replay cannot contact arbitrary URLs or charge a real payment provider.
 
-The built-in investigation explanation is deterministic fixture documentation, **not AI output**. External SDK telemetry uses a durable local ingestion queue; distributed tracing and multi-tenant isolation are not implemented. A replay with no server errors verifies only the captured built-in fixture cases. External replay is deliberately unavailable until an isolated adapter is implemented.
+The built-in investigation notes are deterministic fixture documentation. Optional AI output is labeled separately and is never used to resolve an incident or execute commands. External SDK telemetry uses a durable local ingestion queue; distributed tracing and multi-tenant isolation are not implemented. A replay with no server errors verifies only the captured built-in fixture cases. External replay is unavailable until an isolated adapter is implemented.
+
+## Evidence-based AI investigation (v0.4)
+
+Analysis is **disabled by default** and needs a separately configured server-side OpenAI API key. This project does not use a ChatGPT subscription, search for keys on disk, or silently fall back to invented model results.
+
+```powershell
+# Set OPENAI_API_KEY securely in this shell or through your secret manager.
+$env:INCIDENTLAB_AI_ENABLED='1'
+$env:INCIDENTLAB_AI_MAX_USD='0.02'
+$env:INCIDENTLAB_AI_DAILY_USD='1'
+npm.cmd run dev:postgres
+```
+
+The development launcher passes the provider key only to the collector, not to the worker or sample-service child. Existing PostgreSQL deployments must run `npm.cmd run db:migrate` for `003_incident_analysis.sql` before using analysis. The PostgreSQL dev command applies this automatically. SQLite creates the additive analysis table on opening the existing file. `.env.example` is documentation; direct Node commands do not load it automatically. Docker Compose can consume a local ignored `.env`.
+
+Open an incident and click **Analyze incident**. The page explains that a limited snapshot will be sent to OpenAI. It displays a summary, tentative causes, validation suggestions, next steps, missing evidence and links to the saved evidence rows. The snapshot includes at most twelve captured failures: method, route template, HTTP status, duration and sanitized error class. Request bodies, SDK attributes, headers, raw exception messages and real event IDs are excluded from the provider request. Query strings, recognizable credential strings, long numeric route identifiers and UUID route identifiers are redacted. Applications must still submit route templates: redaction cannot recognize every personal name or arbitrary sensitive path segment.
+
+The provider request uses the pinned `gpt-4.1-mini-2025-04-14` model and strict JSON-schema output through the [OpenAI Responses API](https://developers.openai.com/api/docs/guides/structured-outputs), with no tools, no conversation history, no automatic retries, `store: false`, a 30-second timeout and a maximum of 1,800 output tokens. `store: false` requests no stored Response object; it is not a promise about all provider retention. The model can use only low/medium confidence labels, and the application validates every citation against supplied evidence IDs before displaying the result. Invented references, invalid shapes, refusals and incomplete responses are saved as failures. Citation validity checks that a referenced event exists, not that a causal claim is true. Suggestions are displayed as escaped text and never executed.
+
+### Cache, retries and estimated budgets
+
+Successful results and their exact evidence snapshots persist in either database. Opening or refreshing an incident only reads saved data. The cache key includes the incident, evidence hash, model and prompt version; new captured failures produce a new snapshot and mark older saved results stale. Concurrent collectors share a transactional reservation, so duplicate clicks cannot initiate two provider requests for the same attempt. An explicit failed-request retry is capped at three attempts per snapshot. Pending requests older than 90 seconds become interrupted failures when the analysis endpoint is next accessed. Interrupted or uncertain requests are never automatically retried, and late completions cannot overwrite an expired reservation.
+
+The defaults are an **estimated $0.02 per-request limit** and **$1 UTC daily reservation budget**, shared by all collectors using the same database. The app reserves a conservative estimate before the request using bounded UTF-8 input size plus overhead, the output-token cap, and standard model rates of $0.40 input / $1.60 output per million tokens, checked against the [official model page](https://developers.openai.com/api/docs/models/gpt-4.1-mini) on 2026-11-16. It also saves provider-reported token usage and estimated usage cost. Reservations remain fully counted after success, failure or timeout; they are not refunds or exact billed spend. If reported estimated usage is higher, the ledger counts the larger amount. Pricing, token accounting and other use of the same key can affect actual bills; use provider-side spending controls for account-wide limits. No paid provider call is required by any automated test.
+
+Per-request configuration must be positive and no more than $1; daily configuration must be positive and no more than $10. Invalid configuration disables analysis. Insufficient per-request or shared daily budget rejects the request before contacting the provider. Changes to budget limits do not erase prior reservations. Paid-analysis POSTs accept only loopback dashboard hostnames and reject foreign browser origins. This is still a local, single-user app with no production authentication.
+
+Tests use mocked provider responses to validate request structure, redaction, budget enforcement, cache/staleness, concurrency, persistence, retry limits, refusal/incomplete handling, citation rejection and the HTTP flow. Real PostgreSQL integration tests additionally exercise shared reservations and cached results across separate database pools. A live provider/model-quality check requires an explicitly configured key and is not part of CI.
 
 ## Next milestones
 
@@ -158,7 +191,7 @@ The built-in investigation explanation is deterministic fixture documentation, *
 - [x] Durable SQLite ingestion queue, retries, idempotency, lease recovery and compatibility migration.
 - [x] CI matrix covering Windows/Ubuntu and Node 22/24 (workflow configured; hosted results depend on GitHub Actions).
 - [x] PostgreSQL storage adapter, versioned SQL migrations and independently running workers.
-- [ ] AI explanations grounded in captured evidence, with explicit uncertainty and cost limits.
+- [x] Optional evidence-based AI analysis, citation checks, saved results, uncertainty and estimated budget limits.
 - [ ] Isolated replay workers, controlled fault injection, and comparable latency measurements.
 - [ ] Dashboard authentication, workspaces, deployment, load tests, and a measured public demo.
 
