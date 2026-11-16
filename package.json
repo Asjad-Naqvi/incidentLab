@@ -1,0 +1,13 @@
+{
+  "name": "incidentlab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local incident investigation and request replay lab",
+  "type": "module",
+  "engines": { "node": ">=22.14.0" },
+  "scripts": {
+    "dev": "node --experimental-sqlite --watch server.mjs",
+    "start": "node --experimental-sqlite server.mjs",
+    "test": "node --experimental-sqlite --test"
+  }
+}

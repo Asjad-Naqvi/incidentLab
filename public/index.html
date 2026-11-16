@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101715">
+  <meta name="description" content="IncidentLab: investigate failures, replay requests, and verify fixes.">
+  <title>IncidentLab — Overview</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="IncidentLab home"><span class="brand-mark">i<span>l</span></span>IncidentLab<span class="beta">LAB</span></a>
+    <div class="workspace"><span class="workspace-icon">S</span><div>Sandbox workspace<small>Local development</small></div><span class="chevron">⌄</span></div>
+    <div class="nav-label">WORKSPACE</div>
+    <nav aria-label="Main navigation"><button class="nav-item active" data-view="overview"><span>▦</span>Overview</button><button class="nav-item" data-view="incidents"><span>⚡</span>Incidents<span class="nav-count" id="nav-count">0</span></button><button class="nav-item" data-view="replays"><span>↻</span>Replay history</button></nav>
+    <div class="sidebar-bottom"><div class="local-dot">Local environment</div><p>Your requests stay on this machine.<br>No API key required.</p><div class="profile"><span>Y</span><div>Your playground<small>Developer workspace</small></div></div></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><div><span class="muted">Workspace</span><span class="slash">/</span><span id="breadcrumb">Overview</span></div><div class="connection"><span class="dot"></span><span id="connection-label">Connecting</span><kbd>LOCAL</kbd></div></header>
+    <main>
+      <div class="heading"><div><div class="eyebrow">OBSERVE. INVESTIGATE. VERIFY.</div><h1 id="page-title">A clearer view of what broke.</h1><p id="page-subtitle">From the first error to a fix you can prove.</p></div><button class="primary" id="generate"><span>＋</span> Generate demo traffic</button></div>
+      <section class="lab-banner"><div class="lab-symbol">⌁</div><div><strong>A real failure. A safe place to investigate.</strong><p>Send requests to the sample checkout service, capture a failure, then replay it after a fix.</p></div><span class="badge neutral">INTERACTIVE SANDBOX</span></section>
+      <section class="metrics" aria-label="Service metrics">
+        <article><div class="metric-label">Open incidents <span>⚑</span></div><div class="metric-value" id="metric-open">0</div><div class="metric-caption"><span class="tiny-dot amber"></span>Awaiting investigation</div></article>
+        <article><div class="metric-label">Total requests <span>↗</span></div><div class="metric-value" id="metric-total">0</div><div class="metric-caption">Captured in this workspace</div></article>
+        <article><div class="metric-label">Error rate <span>⌁</span></div><div class="metric-value" id="metric-errors">0<span>%</span></div><div class="metric-caption">Server errors · live requests</div></article>
+        <article><div class="metric-label">p95 response time <span>◷</span></div><div class="metric-value" id="metric-p95">0<span>ms</span></div><div class="metric-caption">Measured in the demo service</div></article>
+      </section>
+      <section class="panel chart-panel" id="chart-panel"><div class="panel-heading"><div><h2>Request activity</h2><p>Live traffic across the sample service</p></div><div class="legend"><span><i class="green"></i>Successful / handled</span><span><i class="orange"></i>Server errors</span><span class="period">Last 60 minutes</span></div></div><div id="chart" class="chart" role="img" aria-label="Request activity over the last hour"></div><div class="chart-labels"><span>60 min ago</span><span>45 min</span><span>30 min</span><span>15 min</span><span>Now</span></div></section>
+      <div class="content-grid">
+        <section class="panel incidents-panel"><div class="panel-heading"><div><h2 id="list-title">Incident inbox <span id="list-count" class="count">0</span></h2><p>Related failures, grouped into one investigation</p></div><select id="status-filter" aria-label="Filter incidents"><option value="all">All statuses</option><option value="open">Open</option><option value="resolved">Resolved</option></select></div><div class="search-row"><label class="search"><span>⌕</span><input id="search" placeholder="Search incidents or services…" aria-label="Search incidents"></label></div><div id="incident-list"></div><div class="panel-footer"><span><span class="tiny-dot green"></span> Updates automatically</span><span id="last-updated">Waiting for data</span></div></section>
+        <section class="panel service-panel"><div class="panel-heading"><div><h2>Your demo service</h2><p>A controlled environment for real evidence</p></div><span class="service-icon">⬡</span></div><div class="service-name"><span class="service-avatar">C</span><div><strong>checkout-api</strong><small>Node.js · local fixture</small></div><span class="dot"></span></div><div class="service-row"><span>Endpoint</span><code>POST /demo/checkout</code></div><div class="service-row"><span>Session handling</span><span id="fixture-status" class="badge warning">Bug enabled</span></div><div class="service-note"><span>↳</span><p>Expired sessions trigger an unhandled error. The demo fix returns a recoverable <code>409</code> instead.</p></div><button id="toggle-fix" class="secondary full">Apply demo fix <span>↗</span></button><div class="service-footnote">Changes this fixture only. No external payments.</div></section>
+      </div>
+      <section id="replay-history" class="panel hidden"><div class="panel-heading"><div><h2>Replay history</h2><p>Persisted evidence from controlled request replays</p></div></div><div id="history-content"></div></section>
+      <footer class="page-footer"><span class="footer-brand">◈ IncidentLab</span><span>Less guesswork. More evidence.</span><span>v0.1 · Local prototype</span></footer>
+    </main>
+  </div>
+  <dialog id="incident-dialog"><div class="drawer-header"><div><span class="eyebrow">INCIDENT INVESTIGATION</span><h2>Checkout failure</h2></div><button id="close-dialog" class="icon-button" aria-label="Close investigation">✕</button></div><div id="incident-detail"></div></dialog>
+  <div id="toast" role="status" class="toast hidden"></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
