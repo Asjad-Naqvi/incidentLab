@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '../sdk/index.mjs';
-import { checkout } from '../lib/service.mjs';
+import { checkout } from './checkout.mjs';
 import { localIngestionKey } from '../lib/config.mjs';
 
 export function createSampleService({ client, fixed = false }) {
@@ -15,7 +15,7 @@ export function createSampleService({ client, fixed = false }) {
       let size = 0;
       for await (const chunk of req) { size += chunk.length; if (size > 4096) return send(413, { error: 'Payload too large' }); chunks.push(chunk); }
       const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
-      if (!payload || !['valid-session', 'expired-session'].includes(payload.fixture)) return send(400, { error: 'Invalid fixture' });
+      if (!payload || !['valid-session', 'expired-session','slow-expired-session'].includes(payload.fixture)) return send(400, { error: 'Invalid fixture' });
       const result = await checkout(payload, fixed);
       client.capture({ method: 'POST', path: '/checkout', status: result.status, durationMs: result.durationMs,
         errorType: result.status >= 500 ? 'PaymentSessionExpired' : null, payload });

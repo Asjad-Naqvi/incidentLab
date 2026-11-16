@@ -8,9 +8,10 @@ import { timingSafeEqual, createHash } from 'node:crypto';
 import { normalizeEvent, ValidationError } from './sdk/telemetry.mjs';
 import { startWorker } from './lib/worker.mjs';
 import { localIngestionKey } from './lib/config.mjs';
+import { createReplayRunner,replaySampleIncident } from './lib/isolated-replay.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/integrations.css': ['integrations.css', 'text/css'] };
+const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/replay.js': ['replay.js','text/javascript'], '/style.css': ['style.css', 'text/css'], '/integrations.css': ['integrations.css', 'text/css'] };
 async function readJSON(req, limit) {
   const chunks = [];
   let bytes = 0;
@@ -22,7 +23,9 @@ async function readJSON(req, limit) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 }
 
-export function createApp(store, { ingestionKey, workerEnabled = true } = {}) {
+export function createApp(store, { ingestionKey, workerEnabled = true,replayOptions = {} } = {}) {
+  const replayRunner = createReplayRunner(replayOptions);
+  const activeReplays = new Set();
   const clients = new Set();
   let busy = false;
   const notify = () => { for (const res of clients) res.write('data: update\n\n'); };
@@ -77,7 +80,18 @@ export function createApp(store, { ingestionKey, workerEnabled = true } = {}) {
         if (req.method === 'POST' && match[2] === '/replay') {
           if (busy) return json(409, { error: 'Another fixture operation is running. Try again shortly.' });
           busy = true;
-          try { const result = await replayIncident(store, match[1]); notify(); return json(200, result); } finally { busy = false; }
+          try {
+            let task;
+            if (incident.service === 'checkout-api') task = replayIncident(store,match[1]);
+            else {
+              const input = await readJSON(req,1024);
+              if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'revision')) return json(400,{ error: 'Provide only a baseline or candidate revision' });
+              task = replaySampleIncident(store,incident,input.revision ?? 'baseline',replayRunner);
+            }
+            activeReplays.add(task);
+            try { const result = await task; notify(); return json(200,result); }
+            finally { activeReplays.delete(task); }
+          } finally { busy = false; }
         }
         if (req.method === 'POST' && match[2] === '/resolve') {
           const latest = incident.replays[0];
@@ -120,7 +134,7 @@ export function createApp(store, { ingestionKey, workerEnabled = true } = {}) {
       else res.end();
     }
   });
-  server.stopWorker = async () => { await worker?.stop(); };
+  server.stopWorker = async () => { await worker?.stop(); await replayRunner.close(); await Promise.allSettled([...activeReplays]); };
   server.on('close', () => { clearInterval(heartbeat); clearInterval(externalUpdates); void worker?.stop(); for (const res of clients) res.end(); });
   return server;
 }

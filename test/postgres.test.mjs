@@ -12,6 +12,7 @@ import { processNextJob } from '../lib/worker.mjs';
 import { createApp } from '../server.mjs';
 import { projectRoot } from '../lib/config.mjs';
 import { createServer as createNetServer } from 'node:net';
+import { createReplayRunner,replaySampleIncident } from '../lib/isolated-replay.mjs';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 const event = (extra = {}) => normalizeEvent({ id: randomUUID(), service: 'orders', method: 'POST',
@@ -205,5 +206,24 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
     }
     await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(500) }));
     await assert.rejects(fetch(`http://127.0.0.1:${samplePort}/healthz`, { signal: AbortSignal.timeout(500) }));
+  });
+
+  await t.test('isolated replay evidence persists in PostgreSQL without changing live metrics or resolving the incident', async () => {
+    await reset();
+    const recorded = await store.record(event({ service: 'checkout-sample',path: '/checkout',errorType: 'PaymentSessionExpired',payload: { fixture: 'slow-expired-session' } }));
+    const incident = await store.incident(recorded.incidentId);
+    const runner = createReplayRunner();
+    try {
+      const replay = await replaySampleIncident(store,incident,'candidate',runner);
+      assert.equal(replay.verificationPassed,true); assert.equal(replay.afterErrors,0);
+      const other = createPostgresStore(postgresPool(connectionString,{ options }));
+      try {
+        const saved = await other.incident(incident.id);
+        assert.equal(saved.replays[0].id,replay.id);
+        assert.equal(saved.replays[0].isolation,'worker-thread');
+        assert.equal(saved.replays[0].results[0].afterStatus,409);
+        assert.equal(saved.status,'open'); assert.equal((await other.metrics()).total,1);
+      } finally { await other.close(); }
+    } finally { await runner.close(); }
   });
 });

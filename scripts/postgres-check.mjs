@@ -23,7 +23,7 @@ try {
     const password = randomBytes(24).toString('hex');
     embedded = new EmbeddedPostgres({ databaseDir: join(directory, 'cluster'), port,
       user: 'postgres', password, persistent: true, authMethod: 'scram-sha-256',
-      initdbFlags: ['--locale=C', '--encoding=UTF8'], postgresFlags: ['-h', '127.0.0.1'],
+      initdbFlags: ['--locale=C', '--encoding=UTF8'], postgresFlags: ['-h', '127.0.0.1',...(process.platform === 'win32' ? ['-c','io_method=sync'] : [])],
       onLog: line => databaseLogs.push(String(line)), onError: () => {} });
     phase = 'initialization';
     await embedded.initialise();

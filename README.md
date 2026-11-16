@@ -39,6 +39,10 @@ Node 22's built-in SQLite module is experimental; the scripts explicitly enable 
 - `server.mjs`: native Node HTTP API, static assets, server-sent live updates, and local mutation boundaries.
 - `lib/store.mjs`: SQLite incidents, captured events, settings, metrics, and replay evidence.
 - `lib/service.mjs`: controlled checkout fixture and replay execution.
+- `sample/checkout.mjs`: trusted sample handler shared by the HTTP service and replay adapter.
+- `lib/isolated-replay.mjs`: bounded worker-thread replay lifecycle and persisted outcomes.
+- `lib/replay-thread.mjs`: paired baseline/candidate execution without ingestion or database clients.
+- `lib/replay-contract.mjs`: explicit service, route, fixture and sample-size validation.
 - `sdk/`: installable local Node SDK with payload opt-in, redaction, bounded buffering and retries.
 - `sample/server.mjs`: independently running checkout HTTP service, instrumented through the SDK.
 - `lib/worker.mjs`: background ingestion processing, retry backoff and lease recovery.
@@ -49,7 +53,7 @@ Node 22's built-in SQLite module is experimental; the scripts explicitly enable 
 - `public/`: responsive, accessible dashboard with search, status filters, an investigation drawer, and replay history.
 - `test/`: end-to-end HTTP workflow, recurrence, input handling, and durable-storage checks.
 
-Only original captured traffic contributes to live metrics. Replays are stored separately. p95 is measured across all captured live requests; the activity chart shows the last hour in two-minute buckets. Incident request lists show the newest twenty failures, replay tables the first ten results, and replay executes up to one hundred captured failures.
+Only original captured traffic contributes to live metrics. Replays are stored separately. p95 is measured across all captured live requests; the activity chart shows the last hour in two-minute buckets. Incident request lists show the newest twenty failures and replay tables the first ten results. The original built-in replay executes up to one hundred failures; the isolated external sample adapter uses at most twenty.
 
 ## API
 
@@ -62,7 +66,7 @@ Only original captured traffic contributes to live metrics. Replays are stored s
 | POST | `/api/demo/fix` | Enable handled session expiry |
 | POST | `/api/demo/break` | Reintroduce the fixture bug |
 | POST | `/demo/checkout` | Execute and capture an allowlisted fixture request |
-| POST | `/api/incidents/:id/replay` | Replay captured failures against the local fixture |
+| POST | `/api/incidents/:id/replay` | Built-in replay, or isolated sample comparison with `{ "revision": "baseline" }` / `{ "revision": "candidate" }` |
 | POST | `/api/incidents/:id/resolve` | Resolve after successful fixed replay evidence |
 | POST | `/api/v1/events` | Authenticated, validated telemetry batch; returns 202 after durable enqueue |
 | GET | `/healthz` | Collector liveness |
@@ -150,7 +154,34 @@ Alternatively set `TEST_DATABASE_URL` to an existing **test** database. The suit
 
 This is a single-user **local prototype**, bound to `127.0.0.1`. Do not expose it publicly. The ingestion API uses a bearer key; dashboard reads and fixture controls have no user authentication or multi-tenant isolation. Mutation requests with a foreign Origin are rejected; this is not a substitute for production authentication. SDK payloads are explicitly opted in and redacted, but redaction is not a guarantee against every sensitive value. Replay cannot contact arbitrary URLs or charge a real payment provider.
 
-The built-in investigation explanation is deterministic fixture documentation, **not AI output**. External SDK telemetry uses a durable local ingestion queue; distributed tracing and multi-tenant isolation are not implemented. A replay with no server errors verifies only the captured built-in fixture cases. External replay is deliberately unavailable until an isolated adapter is implemented.
+The built-in investigation explanation is deterministic fixture documentation, **not AI output**. External SDK telemetry uses a durable local ingestion queue; distributed tracing and multi-tenant isolation are not implemented. External replay supports only the bundled checkout sample through the adapter described below. Other services require explicit, trusted adapters.
+
+## Isolated sample replay and fault injection (v0.5)
+
+This milestone works without any model API or key. The optional AI work remains separate in PR #3.
+
+1. Run `npm.cmd run dev` for SQLite, or `npm.cmd run dev:postgres` for PostgreSQL.
+2. In another terminal, run `npm.cmd run sample:traffic -- --slow`.
+3. Open the `checkout-sample` / `PaymentSessionExpired` incident.
+4. Click **Replay baseline** to reproduce failures in an isolated copy of the sample implementation.
+5. Click **Test candidate fix** to compare baseline handling against the bundled candidate, which handles session expiry before the simulated slow dependency.
+6. Inspect paired error rates, p50/p95/mean latency in saved replay data, implementation hash, reproduction counts, and per-request results. Replay history includes completed and failed attempts.
+
+`--slow` injects a controlled `slow-expired-session` fixture into four of twelve sample requests. The broken sample waits approximately 98 ms and returns 500. Its candidate handles expiry in approximately 18 ms and returns a recoverable 409. Without `--slow`, the existing normal session-expiry fixture continues to work. These delays are artificial, measured with the runtime clock, and subject to machine load; do not present them as production performance claims.
+
+### Isolation boundary and comparisons
+
+The server validates the exact service (`checkout-sample`), error class (`PaymentSessionExpired`), method (`POST`), route (`/checkout`), captured status (500), and fixture enum before copying at most twenty requests to a fresh Node worker thread. Arbitrary target URLs, source code, headers and extra payload fields are not forwarded. The worker receives an empty environment, no inherited Node execution flags, a 32 MB old-generation heap limit, an 8 MB young-generation limit, a 2 MB stack limit, and a ten-second wall-clock deadline. Node heap limits do not cap every native/external allocation; this is a trusted static adapter, not a way to execute untrusted code.
+
+A worker thread has separate JavaScript state but is **not an OS security sandbox**: the code runs within the collector process with normal Node capabilities. The bundled adapter performs no network requests and has no database or SDK client. It loads only the trusted sample handler, executes both revisions in fresh paired measurements, alternates their order, and reports results back. No captured URL is contacted. The implementation hash identifies the actual loaded checkout function. Captured historical timings are preserved for reference, but the comparison metrics use freshly measured baseline and comparison calls in the same worker.
+
+The candidate is a bundled simulation of a patch, not an uploaded diff or a deployment. A pass requires reproducing every selected captured failure in the baseline and observing no candidate server errors. A 409 still means the purchase did not complete. A passed adapter comparison never resolves a live external incident, changes its sample process, or proves that a production fix was deployed. The original built-in fixture's verified-resolution workflow is unchanged.
+
+### Lifecycle and persistence
+
+The collector allows one fixture/replay operation at a time; another request gets 409. This limit is per collector instance, not a distributed quota. Worker timeout, crash, and graceful cancellation save failed replay records with no successful verification. The collector waits for replay cancellation/persistence during graceful shutdown. A whole collector crash can lose an in-flight attempt; there is no durable replay-job queue in this milestone. Successful and failed replay outcomes use the existing JSON replay records in SQLite/PostgreSQL, so no new database migration is needed.
+
+Replay traffic does not enter ingestion, create incidents, or affect live request/error/latency metrics. UI tables show up to ten paired results while persisted records retain the selected request set. Tests cover contract rejection, input minimization, deadline/crash handling, cancellation, concurrency, baseline reproduction, candidate behavior, live-service isolation, history rendering helpers, and PostgreSQL persistence. The embedded Windows test database uses synchronous I/O to avoid orphaned asynchronous-I/O workers during test cleanup; normal PostgreSQL deployment settings are unchanged.
 
 ## Next milestones
 
@@ -159,7 +190,8 @@ The built-in investigation explanation is deterministic fixture documentation, *
 - [x] CI matrix covering Windows/Ubuntu and Node 22/24 (workflow configured; hosted results depend on GitHub Actions).
 - [x] PostgreSQL storage adapter, versioned SQL migrations and independently running workers.
 - [ ] AI explanations grounded in captured evidence, with explicit uncertainty and cost limits.
-- [ ] Isolated replay workers, controlled fault injection, and comparable latency measurements.
+- [x] Isolated checkout-sample replay adapter, controlled fault injection, and paired latency measurements.
+- [ ] OS-level replay sandbox, durable replay jobs and additional trusted service adapters.
 - [ ] Dashboard authentication, workspaces, deployment, load tests, and a measured public demo.
 
 ## Portfolio evidence

@@ -1,3 +1,4 @@
+import { externalDetail,wireExternalReplay,replaySummary } from './replay.js';
 const $ = selector => document.querySelector(selector);
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let state = null;
@@ -6,8 +7,8 @@ let currentView = 'overview';
 let toastTimer;
 const date = value => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-async function api(path, method = 'GET') {
-  const response = await fetch(path, { method });
+async function api(path, method = 'GET', body) {
+  const response = await fetch(path, { method,...(body ? { headers: { 'Content-Type': 'application/json' },body: JSON.stringify(body) } : {}) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Request failed');
   return result;
@@ -72,8 +73,8 @@ async function renderDetail(id) {
   }));
 }
 function renderExternalDetail(incident) {
-  const paths = [...new Set(incident.events.map(e => `${e.method} ${e.path}`))];
-  $('#incident-detail').innerHTML = `<div class="detail-body"><span class="badge critical">${escape(incident.status.toUpperCase())} · ${escape(incident.service)}</span><h3 class="detail-title">${escape(incident.title)}</h3><p class="detail-description">An independently running service reported ${incident.events.length} captured server errors through the authenticated ingestion SDK.</p><div class="detail-section"><h3>Captured evidence</h3><div class="evidence-card"><code>${paths.map(escape).join('<br>')}</code><p>Error class: ${escape(incident.title)}. Inspect application logs and code to establish the cause. Telemetry alone does not prove a root cause.</p></div><div class="evidence-card"><p>Replay is available for the built-in checkout fixture. External services need an isolated replay adapter before requests can be executed or a fix verified here.</p></div></div><div class="detail-section"><h3>Captured requests · ${incident.events.length}</h3><table class="request-table"><thead><tr><th>Time</th><th>Route</th><th>Status</th><th>Duration</th></tr></thead><tbody>${incident.events.slice(0, 20).map(e => `<tr><td>${date(e.created_at)}</td><td>${escape(e.method)} ${escape(e.path)}</td><td class="bad">${e.status}</td><td>${e.duration_ms.toFixed(1)} ms</td></tr>`).join('')}</tbody></table></div><div class="detail-section"><h3>Latest sanitized attributes</h3><pre class="payload-preview">${escape(JSON.stringify(incident.events[0]?.payload ?? {}, null, 2))}</pre></div><p class="disclaimer">Only explicitly selected SDK payload fields are sent. The collector applies additional redaction. Never opt personal data or secrets into telemetry. No AI model has been called.</p></div>`;
+  $('#incident-detail').innerHTML = externalDetail(incident);
+  wireExternalReplay(incident,{ api,action,refresh,toast });
 }
 function renderIntegrations() {
   const ingestion = state.ingestion;
@@ -90,7 +91,9 @@ async function toggleFix() {
 async function renderHistory() {
   const details = await Promise.all(state.incidents.map(i => api(`/api/incidents/${i.id}`)));
   const replays = details.flatMap(i => i.replays.map(r => ({ ...r, incident: i }))).sort((a, b) => b.created_at.localeCompare(a.created_at));
-  $('#history-content').innerHTML = replays.length ? replays.map(r => `<div class="history-row"><div>${escape(r.incident.title)}<small>${new Date(r.created_at).toLocaleString()} · ${r.count} requests · ${r.fixed ? 'fix enabled' : 'bug enabled'}</small></div><span class="badge ${r.afterErrors ? 'critical' : 'success'}">${r.beforeErrorRate.toFixed(0)}% → ${r.afterErrorRate.toFixed(0)}% server errors</span></div>`).join('') : '<div class="empty-state"><div class="empty-icon">↻</div><h3>No replays yet</h3><p>Open an incident and replay its captured requests. Your results will be saved here.</p></div>';
+  $('#history-content').innerHTML = replays.length
+    ? replays.map(r => `<div class="history-row"><div>${escape(r.incident.title)}<small>${new Date(r.created_at).toLocaleString()} · ${r.count} requests · ${r.adapter ? 'isolated ' + escape(r.revision) : r.fixed ? 'fix enabled' : 'bug enabled'}</small></div><span class="badge ${r.state === 'failed' || r.afterErrors ? 'critical' : 'success'}">${replaySummary(r)}</span></div>`).join('')
+    : '<div class="empty-state"><div class="empty-icon">↻</div><h3>No replays yet</h3><p>Open an incident and replay its captured requests. Your results will be saved here.</p></div>';
 }
 $('#generate').addEventListener('click', event => action(event.currentTarget, async () => {
   await api('/api/demo/traffic', 'POST'); toast('12 real demo requests captured'); await refresh();
