@@ -28,7 +28,7 @@ test('queued and leased jobs survive restart and stale leases are recovered with
       assert.deepEqual(second.enqueueBatch(events), { accepted: 0, duplicates: 2 });
       assert.equal(second.incidents()[0].occurrences, 2);
     } finally { second.close(); }
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
 
 test('event write and queue acknowledgment are atomic when a database operation fails', () => {
@@ -72,5 +72,5 @@ test('original prototype database migrates without losing evidence or splitting 
     const reopened = createStore(file);
     try { assert.equal(reopened.incidents()[0].fingerprint, 'checkout-api:POST:/demo/checkout:expiry'); }
     finally { reopened.close(); }
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });

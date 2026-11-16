@@ -80,5 +80,5 @@ test('SQLite preserves captured evidence and fixture state across restarts', () 
     const second = createStore(file);
     try { assert.equal(second.metrics().total, 1); assert.equal(second.incidents().length, 1); assert.equal(second.isFixed(), true); }
     finally { second.close(); }
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 });
