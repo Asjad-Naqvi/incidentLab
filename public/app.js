@@ -80,7 +80,7 @@ function renderIntegrations() {
   $('#ingestion-status').textContent = ingestion.enabled ? 'Authenticated ingestion ready' : 'Ingestion disabled';
   $('#ingestion-status').className = `badge ${ingestion.enabled ? 'success' : 'warning'}`;
   const queue = ingestion.queue;
-  $('#queue-status').textContent = `${queue.queued} queued · ${queue.processing} processing · ${queue.complete} processed · ${queue.dead} failed`;
+  $('#queue-status').textContent = `${ingestion.storage || 'sqlite'} · ${ingestion.workerMode || 'embedded'} worker · ${queue.queued} queued · ${queue.processing} processing · ${queue.complete} processed · ${queue.dead} failed`;
   $('#connected-services').innerHTML = ingestion.services.length ? ingestion.services.map(s => `<div class="connected-service"><div class="service-avatar">${escape(s.service[0].toUpperCase())}</div><div class="connected-name"><strong>${escape(s.service)}</strong><small>${s.service === 'checkout-api' ? 'Built-in replay fixture' : 'Server-side SDK'} · last received ${date(s.last_seen)}</small></div><span>${s.requests} requests</span><span class="badge ${s.errors ? 'warning' : 'success'}">${s.errors} server errors</span></div>`).join('') : '<div class="connected-empty">No telemetry yet. Generate fixture traffic or connect the separate sample service.</div>';
 }
 async function toggleFix() {

@@ -39,4 +39,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     server.close(async () => { await client.close(); process.exit(0); }); server.closeAllConnections();
   };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
+  process.on('message', message => { if (message === 'shutdown') stop(); });
 }

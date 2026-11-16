@@ -17,4 +17,33 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
+      - run: npm ci --omit=dev
       - run: npm test
+  postgres:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        postgres: ['17', '18']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: incidentlab
+          POSTGRES_PASSWORD: ci-only-local-password
+          POSTGRES_DB: incidentlab_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U incidentlab -d incidentlab_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - run: npm ci --omit=dev
+      - run: npm run test:postgres
+        env:
+          TEST_DATABASE_URL: postgresql://incidentlab:ci-only-local-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/incidentlab_test
