@@ -18,9 +18,11 @@ function stop(code = 0) {
   if (process.connected) process.disconnect();
 }
 for (const script of ['server.mjs', 'worker.mjs', 'sample/server.mjs']) {
+  const childEnv = { ...process.env, INCIDENTLAB_WORKER_MODE: 'external', INCIDENTLAB_INGESTION_KEY: key, INCIDENTLAB_ENDPOINT: `http://127.0.0.1:${port}` };
+  if (script !== 'server.mjs') delete childEnv.OPENAI_API_KEY;
   const child = spawn(process.execPath, ['--experimental-sqlite', join(projectRoot, script)], {
     cwd: projectRoot, stdio: ['inherit', 'inherit', 'inherit', 'ipc'], windowsHide: true,
-    env: { ...process.env, INCIDENTLAB_WORKER_MODE: 'external', INCIDENTLAB_INGESTION_KEY: key, INCIDENTLAB_ENDPOINT: `http://127.0.0.1:${port}` }
+    env: childEnv
   });
   children.push(child);
   child.on('error', error => { console.error(`Unable to start ${script}: ${error.message}`); stop(1); });

@@ -8,9 +8,10 @@ import { timingSafeEqual, createHash } from 'node:crypto';
 import { normalizeEvent, ValidationError } from './sdk/telemetry.mjs';
 import { startWorker } from './lib/worker.mjs';
 import { localIngestionKey } from './lib/config.mjs';
+import { createAnalysisService } from './lib/analysis.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/integrations.css': ['integrations.css', 'text/css'] };
+const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/analysis.js': ['analysis.js', 'text/javascript'], '/analysis.css': ['analysis.css','text/css'], '/style.css': ['style.css', 'text/css'], '/integrations.css': ['integrations.css', 'text/css'] };
 async function readJSON(req, limit) {
   const chunks = [];
   let bytes = 0;
@@ -22,7 +23,8 @@ async function readJSON(req, limit) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 }
 
-export function createApp(store, { ingestionKey, workerEnabled = true } = {}) {
+export function createApp(store, { ingestionKey, workerEnabled = true, analysisOptions = {} } = {}) {
+  const analysisService = createAnalysisService(store,analysisOptions);
   const clients = new Set();
   let busy = false;
   const notify = () => { for (const res of clients) res.write('data: update\n\n'); };
@@ -69,11 +71,20 @@ export function createApp(store, { ingestionKey, workerEnabled = true } = {}) {
           enabled: Boolean(ingestionKey), queue, services, storage: store.backend, workerMode: workerEnabled ? 'embedded' : 'external'
         } });
       }
-      const match = url.pathname.match(/^\/api\/incidents\/([a-z0-9-]+)(\/replay|\/resolve)?$/);
+      const match = url.pathname.match(/^\/api\/incidents\/([a-z0-9-]+)(\/replay|\/resolve|\/analysis)?$/);
       if (match) {
         const incident = await store.incident(match[1]);
         if (!incident) return json(404, { error: 'Incident not found' });
         if (req.method === 'GET' && !match[2]) return json(200, incident);
+        if (match[2] === '/analysis') {
+          if (req.method === 'GET') return json(200,await analysisService.view(incident));
+          if (req.method === 'POST') {
+            const hostname = new URL(`http://${req.headers.host}`).hostname;
+            if (!['localhost','127.0.0.1','[::1]'].includes(hostname) || req.headers['sec-fetch-site'] === 'cross-site') return json(403,{ error: 'Analysis requires the local dashboard' });
+            const result = await analysisService.analyze(incident,{ retry: url.searchParams.get('retry') === '1' });
+            notify(); return json(result.analysis?.status === 'pending' ? 202 : 200,result);
+          }
+        }
         if (req.method === 'POST' && match[2] === '/replay') {
           if (busy) return json(409, { error: 'Another fixture operation is running. Try again shortly.' });
           busy = true;
