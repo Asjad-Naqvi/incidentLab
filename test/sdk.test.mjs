@@ -46,6 +46,21 @@ test('SDK refuses remote plaintext telemetry and invalid events without interrup
   await client.close();
 });
 
+test('SDK splits large Unicode payload batches below the collector byte limit', async () => {
+  const batches = [];
+  const client = createClient({ ...config, payloadKeys: ['details'], fetchImpl: async (_url, options) => {
+    batches.push(options.body); return new Response('{}', { status: 202 });
+  } });
+  try {
+    const details = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`field${i}`, '界'.repeat(200)]));
+    for (let i = 0; i < 25; i++) assert.equal(client.capture({ ...input, payload: { details } }), true);
+    assert.deepEqual(await client.flush(), { delivered: 25, pending: 0 });
+    assert.ok(batches.length > 1);
+    assert.ok(batches.every(body => Buffer.byteLength(body) <= 60 * 1024));
+    assert.equal(batches.reduce((n, body) => n + JSON.parse(body).events.length, 0), 25);
+  } finally { await client.close(); }
+});
+
 test('separate sample HTTP service delivers measured requests through SDK to the collector', async t => {
   const store = createStore();
   const collector = createApp(store, { ingestionKey: config.apiKey, workerEnabled: false });

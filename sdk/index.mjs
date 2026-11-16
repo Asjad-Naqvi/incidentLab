@@ -32,13 +32,16 @@ export function createClient({ endpoint, apiKey, service, payloadKeys = [], capa
         let delivered = 0;
         while (delivered < pending && queue.length) {
           const batch = queue.slice(0, Math.min(25, pending - delivered));
+          // Count UTF-8 bytes, not JavaScript characters, against the collector's body limit.
+          while (batch.length > 1 && Buffer.byteLength(JSON.stringify({ events: batch })) > 60 * 1024) batch.pop();
+          const body = JSON.stringify({ events: batch });
           let accepted = false;
           for (let attempt = 0; attempt < maxAttempts; attempt++) {
             let retryable = true;
             try {
               const response = await fetchImpl(url, { method: 'POST', redirect: 'error',
                 headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ events: batch }), signal: AbortSignal.timeout(timeoutMs) });
+                body, signal: AbortSignal.timeout(timeoutMs) });
               await response.arrayBuffer();
               if (response.status === 202) { accepted = true; break; }
               retryable = [408, 429].includes(response.status) || response.status >= 500;
