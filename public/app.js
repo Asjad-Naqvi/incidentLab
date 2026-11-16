@@ -5,10 +5,23 @@ let state = null;
 let selected = null;
 let currentView = 'overview';
 let toastTimer;
+let csrfToken;
+const authReady = fetch('/api/auth/status').then(async response => {
+  if (!response.ok) throw new Error('Authentication unavailable');
+  const session = await response.json();
+  if (!session.authenticated) { window.location.replace('/login'); return false; }
+  csrfToken = session.csrfToken;
+  $('#owner-name').textContent = session.user.username;
+  $('#logout').disabled = false;
+  return true;
+});
 const date = value => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 async function api(path, method = 'GET', body) {
-  const response = await fetch(path, { method,...(body ? { headers: { 'Content-Type': 'application/json' },body: JSON.stringify(body) } : {}) });
+  if (!await authReady) throw new Error('Sign-in required');
+  const headers = { ...(body ? { 'Content-Type': 'application/json' } : {}),...(method === 'POST' ? { 'X-CSRF-Token': csrfToken } : {}) };
+  const response = await fetch(path, { method,headers,...(body ? { body: JSON.stringify(body) } : {}) });
+  if (response.status === 401) { window.location.replace('/login'); throw new Error('Your session expired'); }
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Request failed');
   return result;
@@ -99,6 +112,9 @@ $('#generate').addEventListener('click', event => action(event.currentTarget, as
   await api('/api/demo/traffic', 'POST'); toast('12 real demo requests captured'); await refresh();
 }));
 $('#toggle-fix').addEventListener('click', event => action(event.currentTarget, toggleFix));
+$('#logout').addEventListener('click',event => action(event.currentTarget,async () => {
+  await api('/api/auth/logout','POST'); window.location.replace('/login');
+}));
 $('#search').addEventListener('input', () => state && renderList());
 $('#status-filter').addEventListener('change', () => state && renderList());
 $('#close-dialog').addEventListener('click', () => $('#incident-dialog').close());
@@ -117,5 +133,8 @@ document.querySelectorAll('[data-view]').forEach(button => button.addEventListen
 const stream = new EventSource('/api/stream');
 stream.onopen = () => { $('#connection-label').textContent = 'Live connection'; };
 stream.onmessage = () => refresh();
-stream.onerror = () => { $('#connection-label').textContent = 'Reconnecting…'; };
+stream.onerror = async () => {
+  $('#connection-label').textContent = 'Reconnecting…';
+  try { const status = await (await fetch('/api/auth/status')).json(); if (!status.authenticated) window.location.replace('/login'); } catch { /* Retry when the collector returns. */ }
+};
 refresh();

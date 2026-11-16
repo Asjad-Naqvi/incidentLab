@@ -1,6 +1,6 @@
 {
   "name": "incidentlab",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "description": "A local incident investigation and request replay lab",
   "type": "module",
@@ -16,6 +16,8 @@
     "start": "node --experimental-sqlite server.mjs",
     "worker": "node --experimental-sqlite worker.mjs",
     "db:migrate": "node scripts/migrate.mjs",
+    "auth:setup": "node --experimental-sqlite scripts/auth-owner.mjs",
+    "auth:password": "node --experimental-sqlite scripts/auth-owner.mjs --reset",
     "test:postgres": "node scripts/postgres-check.mjs",
     "test": "node --experimental-sqlite --test --test-concurrency=1"
   },

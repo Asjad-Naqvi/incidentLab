@@ -13,6 +13,7 @@ import { createApp } from '../server.mjs';
 import { projectRoot } from '../lib/config.mjs';
 import { createServer as createNetServer } from 'node:net';
 import { createReplayRunner,replaySampleIncident } from '../lib/isolated-replay.mjs';
+import { hashPassword,createAuth } from '../lib/auth.mjs';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 const event = (extra = {}) => normalizeEvent({ id: randomUUID(), service: 'orders', method: 'POST',
@@ -27,29 +28,30 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
   const pool = postgresPool(connectionString, { options });
   const store = createPostgresStore(pool);
   t.after(async () => { await store.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); });
-  const reset = () => pool.query('TRUNCATE replays,events,incidents,ingestion_jobs');
+  const reset = () => pool.query('TRUNCATE auth_sessions,auth_users,auth_limits,incident_analyses,replays,events,incidents,ingestion_jobs');
+  const migrationFiles = ['001_core.sql','002_ingestion_queue.sql','003_incident_analysis.sql','004_owner_auth.sql'];
 
   await t.test('versioned migrations serialize concurrent runners and detect changed history', async () => {
     const applied = await Promise.all([migratePostgres(pool), migratePostgres(pool)]);
-    assert.equal(applied.flat().length, 2);
+    assert.equal(applied.flat().length, 4);
     assert.deepEqual(await migratePostgres(pool), []);
     const directory = await mkdtemp(join(tmpdir(), 'incidentlab-migrations-'));
     try {
-      for (const name of ['001_core.sql', '002_ingestion_queue.sql']) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
+      for (const name of migrationFiles) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
       await writeFile(join(directory, '001_core.sql'), '-- tampered history');
       await assert.rejects(migratePostgres(pool, directory), /history mismatch/);
-      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 2);
+      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 4);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
   await t.test('failed migration rolls back all pending DDL and migration records', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'incidentlab-migration-failure-'));
     try {
-      for (const name of ['001_core.sql', '002_ingestion_queue.sql']) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
-      await writeFile(join(directory, '003_bad.sql'), 'CREATE TABLE should_rollback (id INT); SELECT nonexistent_column;');
+      for (const name of migrationFiles) await writeFile(join(directory, name), await readFile(join(migrationDirectory, name)));
+      await writeFile(join(directory, '005_bad.sql'), 'CREATE TABLE should_rollback (id INT); SELECT nonexistent_column;');
       await assert.rejects(migratePostgres(pool, directory));
       assert.equal((await pool.query("SELECT to_regclass('should_rollback') AS name")).rows[0].name, null);
-      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 2);
+      assert.equal((await pool.query('SELECT COUNT(*)::int AS n FROM schema_migrations')).rows[0].n, 4);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });
 
@@ -133,7 +135,7 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
 
   await t.test('HTTP fixture replay and resolution use the asynchronous storage contract', async () => {
     await reset(); await store.setFixed(false);
-    const server = createApp(store, { workerEnabled: false });
+    const server = createApp(store, { authRequired: false, workerEnabled: false });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const base = `http://127.0.0.1:${server.address().port}`;
     try {
@@ -170,6 +172,7 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
 
   await t.test('development launcher starts three roles, ingests HTTP traffic, and shuts down its process tree', async () => {
     await reset();
+    await store.createOwner('owner',await hashPassword('test-owner-password-123'));
     const freePort = async () => {
       const server = createNetServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
       const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
@@ -195,7 +198,10 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
         await response.arrayBuffer();
       }
       while ((await store.metrics()).total < 2 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
-      const overview = await (await fetch(`http://127.0.0.1:${port}/api/overview`)).json();
+      const signedIn = await fetch(`http://127.0.0.1:${port}/api/auth/login`,{ method: 'POST',body: JSON.stringify({ username: 'owner',password: 'test-owner-password-123' }) });
+      assert.equal(signedIn.status,200);
+      const cookie = signedIn.headers.get('set-cookie').split(';')[0];
+      const overview = await (await fetch(`http://127.0.0.1:${port}/api/overview`,{ headers: { Cookie: cookie } })).json();
       assert.equal(overview.metrics.total, 2);
       assert.equal(overview.ingestion.workerMode, 'external');
       assert.equal(overview.ingestion.storage, 'postgres');
@@ -225,5 +231,51 @@ test('PostgreSQL storage contract and independent worker', { skip: !connectionSt
         assert.equal(saved.status,'open'); assert.equal((await other.metrics()).total,1);
       } finally { await other.close(); }
     } finally { await runner.close(); }
+  });
+
+  await t.test('owner bootstrap, shared sessions and password recovery are atomic across PostgreSQL collectors', async () => {
+    await reset();
+    const password = 'postgres-auth-test-passphrase';
+    const encoded = await hashPassword(password);
+    const other = createPostgresStore(postgresPool(connectionString,{ options }));
+    try {
+      const created = await Promise.allSettled([store.createOwner('first-owner',encoded),other.createOwner('second-owner',encoded)]);
+      assert.equal(created.filter(result => result.status === 'fulfilled').length,1);
+      assert.equal(await store.ownerCount(),1);
+      const user = created.find(result => result.status === 'fulfilled').value;
+      const firstAuth = createAuth(store); const secondAuth = createAuth(other);
+      const session = await firstAuth.login({ username: user.username,password },'local');
+      const request = { headers: { cookie: session.cookie.split(';')[0] } };
+      assert.equal((await secondAuth.session(request)).user.id,user.id);
+      await other.replaceOwnerPassword(user.username,await hashPassword('replacement-postgres-passphrase'));
+      assert.equal(await firstAuth.session(request),null);
+      await assert.rejects(store.createSession(user.id,'stale-login-token',Date.now(),Date.now()+3600000,encoded),{ status: 401 });
+    } finally { await other.close(); }
+  });
+
+  await t.test('login throttling is shared and session-protected HTTP endpoints work against PostgreSQL', async () => {
+    await reset();
+    const other = createPostgresStore(postgresPool(connectionString,{ options }));
+    try {
+      const limits = [{ key: 'shared-test-limit',max: 2 }]; const now = Date.now();
+      await Promise.all([store.recordLoginAttempt(limits,now),other.recordLoginAttempt(limits,now)]);
+      await assert.rejects(other.recordLoginAttempt(limits,now),{ status: 429 });
+      await other.recordLoginAttempt(limits,now+16*60000);
+    } finally { await other.close(); }
+    await store.createOwner('owner',await hashPassword('postgres-http-test-passphrase'));
+    const server = createApp(store);
+    await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      assert.equal((await fetch(base+'/api/overview')).status,401);
+      const response = await fetch(base+'/api/auth/login',{ method: 'POST',body: JSON.stringify({ username: 'owner',password: 'postgres-http-test-passphrase' }) });
+      assert.equal(response.status,200);
+      const cookie = response.headers.get('set-cookie').split(';')[0]; const { csrfToken } = await response.json();
+      const headers = { Cookie: cookie,'X-CSRF-Token': csrfToken };
+      assert.equal((await fetch(base+'/api/demo/traffic',{ method: 'POST',headers })).status,200);
+      assert.equal((await (await fetch(base+'/api/overview',{ headers })).json()).metrics.total,12);
+      assert.equal((await fetch(base+'/api/auth/logout',{ method: 'POST',headers })).status,200);
+      assert.equal((await fetch(base+'/api/overview',{ headers })).status,401);
+    } finally { await server.stopWorker(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   });
 });

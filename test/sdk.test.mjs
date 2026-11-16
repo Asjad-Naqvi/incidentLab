@@ -63,7 +63,7 @@ test('SDK splits large Unicode payload batches below the collector byte limit', 
 
 test('separate sample HTTP service delivers measured requests through SDK to the collector', async t => {
   const store = createStore();
-  const collector = createApp(store, { ingestionKey: config.apiKey, workerEnabled: false });
+  const collector = createApp(store, { authRequired: false, ingestionKey: config.apiKey, workerEnabled: false });
   await new Promise(resolve => collector.listen(0, '127.0.0.1', resolve));
   const client = createClient({ ...config, endpoint: `http://127.0.0.1:${collector.address().port}`, payloadKeys: ['fixture', 'amount'] });
   const sample = createSampleService({ client });

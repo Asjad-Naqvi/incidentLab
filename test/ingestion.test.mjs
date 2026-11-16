@@ -11,7 +11,7 @@ const event = (extra = {}) => ({ id: randomUUID(), service: 'orders', method: 'P
   durationMs: 23.5, errorType: 'DatabaseTimeout', ...extra });
 async function app(t, options = {}) {
   const store = createStore();
-  const server = createApp(store, { ingestionKey: key, workerEnabled: false, ...options });
+  const server = createApp(store, { authRequired: false, ingestionKey: key, workerEnabled: false, ...options });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { await server.stopWorker(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const url = `http://127.0.0.1:${server.address().port}`;
