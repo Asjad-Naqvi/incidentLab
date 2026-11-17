@@ -13,6 +13,23 @@ const authReady = fetch('/api/auth/status').then(async response => {
   csrfToken = session.csrfToken;
   $('#owner-name').textContent = session.user.username;
   $('#logout').disabled = false;
+  if (session.demo) {
+    document.body.classList.add('public-demo');
+    $('#demo-guide').hidden = false;
+    $('#logout').textContent = 'End demo';
+    $('.workspace small').textContent = 'Private visitor sandbox';
+    $('.local-dot').textContent = 'Public demo';
+    $('.sidebar-bottom p').textContent = 'Synthetic data. Only your browser session can access this sandbox.';
+    $('.profile small').textContent = 'Temporary sandbox';
+    $('.topbar kbd').textContent = 'DEMO';
+    $('.page-footer span:last-child').textContent = 'v0.7 · Public demo';
+    const updateExpiry = () => {
+      const minutes = Math.max(0,Math.min(20,Math.ceil((session.expiresAt-Date.now())/60000)));
+      $('#demo-expiry').textContent = minutes ? 'Resets in about ' + minutes + ' minutes. End the demo to start over.' : 'Demo ended. Start a fresh sandbox.';
+      if (!minutes) window.location.replace('/login');
+    };
+    updateExpiry(); setInterval(updateExpiry,30000);
+  }
   return true;
 });
 const date = value => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });

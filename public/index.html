@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101715">
   <meta name="description" content="IncidentLab: investigate failures, replay requests, and verify fixes.">
-  <title>IncidentLab — Overview</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/integrations.css">
+  <title>IncidentLab — Overview</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/integrations.css"><link rel="stylesheet" href="/demo.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -17,6 +17,7 @@
   <div class="main-shell">
     <header class="topbar"><div><span class="muted">Workspace</span><span class="slash">/</span><span id="breadcrumb">Overview</span></div><div class="connection"><span class="dot"></span><span id="connection-label">Connecting</span><kbd>LOCAL</kbd><button class="secondary" id="logout" disabled>Sign out</button></div></header>
     <main>
+      <section id="demo-guide" class="demo-guide" hidden aria-label="Public demo walkthrough"><div><strong>Your private demo sandbox</strong><p>1. Generate traffic → 2. Open an incident and replay → 3. Apply the fix → 4. Replay again and mark resolved.</p><small id="demo-expiry"></small></div><span>Sample data only · No API key</span></section>
       <div class="heading"><div><div class="eyebrow">OBSERVE. INVESTIGATE. VERIFY.</div><h1 id="page-title">A clearer view of what broke.</h1><p id="page-subtitle">From the first error to a fix you can prove.</p></div><button class="primary" id="generate"><span>＋</span> Generate demo traffic</button></div>
       <section class="lab-banner"><div class="lab-symbol">⌁</div><div><strong>A real failure. A safe place to investigate.</strong><p>Send requests to the sample checkout service, capture a failure, then replay it after a fix.</p></div><span class="badge neutral">INTERACTIVE SANDBOX</span></section>
       <section class="metrics" aria-label="Service metrics">
