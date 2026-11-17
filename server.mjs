@@ -10,9 +10,10 @@ import { startWorker } from './lib/worker.mjs';
 import { localIngestionKey } from './lib/config.mjs';
 import { createReplayRunner,replaySampleIncident } from './lib/isolated-replay.mjs';
 import { createAuth } from './lib/auth.mjs';
+import { securityHeaders,configureHttp,deploymentOrigin,shutdown } from './lib/http-security.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const files = { '/': ['index.html', 'text/html'], '/login': ['login.html','text/html'], '/login.js': ['login.js','text/javascript'], '/auth.css': ['auth.css','text/css'], '/app.js': ['app.js', 'text/javascript'], '/replay.js': ['replay.js','text/javascript'], '/style.css': ['style.css', 'text/css'], '/integrations.css': ['integrations.css', 'text/css'] };
+const files = { '/': ['index.html', 'text/html'], '/login': ['login.html','text/html'], '/login.js': ['login.js','text/javascript'], '/auth.css': ['auth.css','text/css'], '/app.js': ['app.js', 'text/javascript'], '/replay.js': ['replay.js','text/javascript'], '/style.css': ['style.css', 'text/css'], '/integrations.css': ['integrations.css', 'text/css'], '/demo.css': ['demo.css', 'text/css'] };
 async function readJSON(req, limit) {
   const chunks = [];
   let bytes = 0;
@@ -46,9 +47,10 @@ export function createApp(store, { ingestionKey, workerEnabled = true,replayOpti
   const externalUpdates = !workerEnabled ? setInterval(notify, 2000) : null;
   externalUpdates?.unref();
   const server = createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://localhost');
+    securityHeaders(res,{ secure: authOptions.secureCookies || authOptions.publicOrigin?.startsWith('https:') });
     const json = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
     try {
+      const url = new URL(req.url, 'http://localhost');
       // Local dashboard mutation endpoints must not be callable cross-origin.
       if (req.method === 'POST' && ((req.headers.origin && req.headers.origin !== auth.requestOrigin(req)) || req.headers['sec-fetch-site'] === 'cross-site')) return json(403, { error: 'Cross-origin mutation rejected' });
       if (req.method === 'GET' && url.pathname === '/healthz') { await store.ping(); return json(200, { status: 'ok', storage: store.backend }); }
@@ -165,15 +167,18 @@ export function createApp(store, { ingestionKey, workerEnabled = true,replayOpti
       else res.end();
     }
   });
-  server.stopWorker = async () => { await worker?.stop(); await replayRunner.close(); await Promise.allSettled([...activeReplays]); };
+  configureHttp(server);
+  server.stopWorker = async () => { for (const [res] of clients) res.end(); clients.clear(); await worker?.stop(); await replayRunner.close(); await Promise.allSettled([...activeReplays]); };
   server.on('close', () => { clearInterval(heartbeat); clearInterval(externalUpdates); void worker?.stop(); for (const [res] of clients) res.end(); });
   return server;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const publicOrigin = deploymentOrigin();
   const store = await openStore();
   const server = createApp(store, { ingestionKey: localIngestionKey(), workerEnabled: process.env.INCIDENTLAB_WORKER_MODE !== 'external',
-    authOptions: { publicOrigin: process.env.INCIDENTLAB_PUBLIC_ORIGIN,secureCookies: process.env.INCIDENTLAB_COOKIE_SECURE === '1' } });
+    authOptions: { publicOrigin,secureCookies: process.env.INCIDENTLAB_COOKIE_SECURE === '1' || publicOrigin?.startsWith('https:') } });
+  if (process.env.INCIDENTLAB_REQUEST_LOG === '1') configureHttp(server,{ logRequests: true });
   const port = Number(process.env.PORT || 4317);
   const host = process.env.INCIDENTLAB_HOST || '127.0.0.1';
   server.listen(port, host, () => console.log(`IncidentLab ready at http://${host}:${port} (${store.backend})`));
@@ -182,7 +187,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    await server.stopWorker(); server.close(async () => { await store.close(); process.exit(0); }); server.closeAllConnections();
+    try { await shutdown(server,() => store.close()); if (process.connected) process.disconnect(); } catch { console.error('Shutdown failed'); process.exitCode = 1; }
   };
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   process.on('message', message => { if (message === 'shutdown') void stop(); });

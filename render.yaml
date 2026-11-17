@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: incidentlab-demo
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node --max-old-space-size=256 demo-server.mjs
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 15
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: INCIDENTLAB_HOST
+        value: 0.0.0.0

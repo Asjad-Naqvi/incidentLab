@@ -1,0 +1,17 @@
+{
+  "measuredAt": "2026-11-17T14:37:40.346Z",
+  "node": "v22.14.0",
+  "platform": "win32",
+  "arch": "x64",
+  "scope": "Local HTTP collector + in-memory SQLite, serial batches, paused worker then same-process drain. Not PostgreSQL, public-host capacity, or crash-recovery performance.",
+  "events": 500,
+  "batchSize": 25,
+  "concurrentRequests": 1,
+  "acceptanceMs": 147,
+  "acceptedEventsPerSecond": 3407,
+  "p95BatchAcceptanceMs": 10,
+  "queuedBeforeRecovery": 500,
+  "drainedEvents": 500,
+  "drainMs": 244,
+  "queueAfterRecovery": { "queued": 0, "processing": 0, "complete": 500, "dead": 0 }
+}

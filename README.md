@@ -2,6 +2,19 @@
 
 A local incident investigation platform: capture a service failure, inspect its evidence, replay captured requests, and measure what changes after a fix.
 
+## Free public demo (v0.7)
+
+Run an isolated visitor sandbox alongside your owner workspace:
+
+```powershell
+npm.cmd run demo
+# Or: docker compose -p incidentlab-demo-preview -f compose.demo.yml up -d --build --wait
+```
+
+Open **http://127.0.0.1:4318**, choose **Start my demo**, and follow the on-screen failure → replay → fix walkthrough. Each visitor gets a separate 20-minute in-memory sandbox with bounded requests/replays. Public ingestion and owner APIs are unavailable; no account, AI key or persistent database is required.
+
+[Deploy on Render's Free plan and operate the owner stack](docs/deployment.md). The included `render.yaml` provisions only one free web service. Public hosting still requires connecting your Render account and verifying its URL; no hosted URL is claimed here. Free instances sleep when idle, and demo data resets on restart.
+
 ## Run
 
 Requires **Node.js 22.14 or later**. No account, GPU, or model API key is required. Install dependencies once:
@@ -140,7 +153,7 @@ PostgreSQL workers atomically claim rows with `FOR UPDATE SKIP LOCKED`. Multiple
 
 ### Docker Compose
 
-`Dockerfile` and `compose.yml` define PostgreSQL 17, a one-shot migration job, collector and independent worker. Set random **URI-safe** `POSTGRES_PASSWORD` and `INCIDENTLAB_INGESTION_KEY` values using your shell or a local ignored `.env`, then run `docker compose up --build`. The collector is published only on `127.0.0.1:4317`; PostgreSQL has no host-published port. The Node image installs production dependencies and runs as a non-root user. Add workers with `docker compose up --scale worker=2`. Compose is optional and was not run locally because Docker is not installed.
+`Dockerfile` and `compose.yml` define PostgreSQL 17, a one-shot migration job, collector and independent worker. Set random **URI-safe** `POSTGRES_PASSWORD` and `INCIDENTLAB_INGESTION_KEY` values using your shell or a local ignored `.env`, then run `docker compose up --build`. The collector is published only on `127.0.0.1:4317`; PostgreSQL has no host-published port. The Node image installs production dependencies and runs as a non-root user. Add workers with `docker compose up --scale worker=2`. The full Compose stack has been validated locally with Docker Desktop.
 
 This remains a local deployment template. After startup, initialize the owner with `docker compose exec collector npm run auth:setup` in an interactive terminal. The compose ingestion key must contain at least 24 characters. Back up the PostgreSQL volume before schema changes and do not delete it to perform routine upgrades. Configure an HTTPS reverse proxy and the exact public origin before any non-local deployment; owner login alone does not make this a hardened multi-user service.
 
@@ -236,8 +249,18 @@ Docker Desktop validation passed on Windows using the Linux-container engine. Th
 - [x] Isolated checkout-sample replay adapter, controlled fault injection, and paired latency measurements.
 - [ ] OS-level replay sandbox, durable replay jobs and additional trusted service adapters.
 - [x] Owner authentication, session protection, local setup/recovery and shared login throttling.
-- [ ] Multi-user workspaces/roles, deployment hardening, load tests, and a measured public demo.
+- [x] Isolated public-demo mode, free Render blueprint, bounded HTTP/resources, graceful shutdown, and backup/recovery runbook.
+- [x] Reproducible local ingestion/paused-queue benchmark (scope and measured output in docs/benchmark-local.json).
+- [ ] Connect Render account, deploy on the Free plan, and verify the public URL.
+- [ ] Multi-user workspaces/roles, internet-scale abuse protection, and production PostgreSQL load tests.
 
 ## Portfolio evidence
+
+[Architecture and trust boundaries](docs/architecture.md) · [Deployment and recovery runbook](docs/deployment.md)
+
+![Public demo landing page](docs/images/demo-landing.png)
+
+![Replay evidence after applying the fixture fix](docs/images/demo-replay.png)
+
 
 Record a short failure-to-resolution demo and publish the test output and architecture tradeoffs. Add throughput or latency claims to your résumé only after measuring them. This first milestone proves incident grouping, persisted evidence, recurrence handling, and controlled request replay.

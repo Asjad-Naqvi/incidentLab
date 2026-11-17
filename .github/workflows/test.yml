@@ -47,3 +47,15 @@ jobs:
       - run: npm run test:postgres
         env:
           TEST_DATABASE_URL: postgresql://incidentlab:ci-only-local-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/incidentlab_test
+
+  demo-container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker build -t incidentlab-demo:ci .
+      - name: Verify isolated demo in a constrained container
+        run: >-
+          docker run --rm --read-only --tmpfs /tmp:size=16m
+          --memory 512m --cpus 0.5 --cap-drop ALL
+          --security-opt no-new-privileges
+          incidentlab-demo:ci node --experimental-sqlite --test test/demo.test.mjs
