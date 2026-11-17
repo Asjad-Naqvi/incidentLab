@@ -27,6 +27,8 @@ services:
       INCIDENTLAB_INGESTION_KEY: ${INCIDENTLAB_INGESTION_KEY:?Set a random ingestion key of at least 24 characters}
       INCIDENTLAB_WORKER_MODE: external
       INCIDENTLAB_HOST: 0.0.0.0
+      INCIDENTLAB_PUBLIC_ORIGIN: ${INCIDENTLAB_PUBLIC_ORIGIN:-}
+      INCIDENTLAB_COOKIE_SECURE: ${INCIDENTLAB_COOKIE_SECURE:-0}
     ports:
       - "127.0.0.1:4317:4317"
     depends_on:

@@ -109,7 +109,7 @@ test('runner shutdown cancels active workers and rejects later runs', async () =
 
 test('HTTP replay validates revisions, rejects arbitrary targets and cannot resolve a live external incident', async t => {
   const store = createStore(); const item = capture(store);
-  const server = createApp(store);
+  const server = createApp(store,{ authRequired: false });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   t.after(async () => { await server.stopWorker(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -125,7 +125,7 @@ test('HTTP replay validates revisions, rejects arbitrary targets and cannot reso
 
 test('external sample ingestion → isolated replay preserves live service behavior and metrics', async t => {
   const store = createStore(); const key = 'replay-integration-credential-32chars';
-  const collector = createApp(store,{ ingestionKey: key,workerEnabled: false });
+  const collector = createApp(store,{ authRequired: false,ingestionKey: key,workerEnabled: false });
   await new Promise(resolve => collector.listen(0,'127.0.0.1',resolve));
   const base = `http://127.0.0.1:${collector.address().port}`;
   const client = createClient({ endpoint: base,apiKey: key,service: 'checkout-sample',payloadKeys: ['fixture'],flushIntervalMs: 0 });
@@ -149,7 +149,7 @@ test('collector rejects concurrent fixture work and saves cancellation before sh
   const store = createStore(); const item = capture(store);
   let entered; const started = new Promise(resolve => { entered = resolve; });
   class AnnouncedWorker extends StalledWorker { constructor(...args) { super(...args); entered(); } }
-  const server = createApp(store,{ replayOptions: { WorkerClass: AnnouncedWorker } });
+  const server = createApp(store,{ authRequired: false,replayOptions: { WorkerClass: AnnouncedWorker } });
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   t.after(async () => { await server.stopWorker(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;

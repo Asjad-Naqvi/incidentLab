@@ -12,10 +12,10 @@
     <div class="workspace"><span class="workspace-icon">S</span><div>Sandbox workspace<small>Local development</small></div><span class="chevron">⌄</span></div>
     <div class="nav-label">WORKSPACE</div>
     <nav aria-label="Main navigation"><button class="nav-item active" data-view="overview"><span>▦</span>Overview</button><button class="nav-item" data-view="incidents"><span>⚡</span>Incidents<span class="nav-count" id="nav-count">0</span></button><button class="nav-item" data-view="replays"><span>↻</span>Replay history</button></nav>
-    <div class="sidebar-bottom"><div class="local-dot">Local environment</div><p>Private telemetry. Local evidence.<br>No model API key required.</p><div class="profile"><span>Y</span><div>Your playground<small>Developer workspace</small></div></div></div>
+    <div class="sidebar-bottom"><div class="local-dot">Local environment</div><p>Private telemetry. Local evidence.<br>No model API key required.</p><div class="profile"><span>Y</span><div><span id="owner-name">Workspace owner</span><small>Authenticated workspace</small></div></div></div>
   </aside>
   <div class="main-shell">
-    <header class="topbar"><div><span class="muted">Workspace</span><span class="slash">/</span><span id="breadcrumb">Overview</span></div><div class="connection"><span class="dot"></span><span id="connection-label">Connecting</span><kbd>LOCAL</kbd></div></header>
+    <header class="topbar"><div><span class="muted">Workspace</span><span class="slash">/</span><span id="breadcrumb">Overview</span></div><div class="connection"><span class="dot"></span><span id="connection-label">Connecting</span><kbd>LOCAL</kbd><button class="secondary" id="logout" disabled>Sign out</button></div></header>
     <main>
       <div class="heading"><div><div class="eyebrow">OBSERVE. INVESTIGATE. VERIFY.</div><h1 id="page-title">A clearer view of what broke.</h1><p id="page-subtitle">From the first error to a fix you can prove.</p></div><button class="primary" id="generate"><span>＋</span> Generate demo traffic</button></div>
       <section class="lab-banner"><div class="lab-symbol">⌁</div><div><strong>A real failure. A safe place to investigate.</strong><p>Send requests to the sample checkout service, capture a failure, then replay it after a fix.</p></div><span class="badge neutral">INTERACTIVE SANDBOX</span></section>
@@ -32,7 +32,7 @@
       </div>
       <section id="replay-history" class="panel hidden"><div class="panel-heading"><div><h2>Replay history</h2><p>Persisted evidence from controlled request replays</p></div></div><div id="history-content"></div></section>
       <section class="panel integrations-panel" aria-label="Connected services"><div class="panel-heading"><div><h2>Connected services</h2><p>Real telemetry from independently running applications</p></div><span id="ingestion-status" class="badge neutral">Loading ingestion</span></div><div id="connected-services"></div><div class="ingestion-footer"><span id="queue-status">Waiting for queue status</span><details><summary>Connect the sample service</summary><p>Run <code>npm.cmd run dev</code> for SQLite or <code>npm.cmd run dev:postgres</code> for PostgreSQL. Both launch the collector, a separate ingestion worker, and the sample service. Run <code>npm.cmd run sample:traffic</code> in a second terminal. New services appear after their first processed request.</p></details></div></section>
-      <footer class="page-footer"><span class="footer-brand">◈ IncidentLab</span><span>Less guesswork. More evidence.</span><span>v0.5 · Local prototype</span></footer>
+      <footer class="page-footer"><span class="footer-brand">◈ IncidentLab</span><span>Less guesswork. More evidence.</span><span>v0.6 · Owner workspace</span></footer>
     </main>
   </div>
   <dialog id="incident-dialog"><div class="drawer-header"><div><span class="eyebrow">INCIDENT INVESTIGATION</span><h2>Checkout failure</h2></div><button id="close-dialog" class="icon-button" aria-label="Close investigation">✕</button></div><div id="incident-detail"></div></dialog>

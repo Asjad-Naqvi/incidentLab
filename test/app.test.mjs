@@ -8,7 +8,7 @@ import { createApp } from '../server.mjs';
 
 test('checkout failure → grouped incident → failed replay → fix → successful replay → resolution', async t => {
   const store = createStore();
-  const server = createApp(store);
+  const server = createApp(store,{ authRequired: false });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -48,7 +48,7 @@ test('checkout failure → grouped incident → failed replay → fix → succes
 
 test('HTTP boundaries: local assets, input validation, origin checks and payload allowlist', async t => {
   const store = createStore();
-  const server = createApp(store);
+  const server = createApp(store,{ authRequired: false });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`;

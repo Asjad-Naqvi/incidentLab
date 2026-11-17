@@ -9,10 +9,11 @@ Requires **Node.js 22.14 or later**. No account, GPU, or model API key is requir
 ```powershell
 cd incidentlab
 npm.cmd ci
+npm.cmd run auth:setup
 npm.cmd start
 ```
 
-Open **http://127.0.0.1:4317**. On Windows, `npm.cmd` avoids PowerShell execution-policy restrictions on `npm.ps1`.
+Open **http://127.0.0.1:4317** and sign in with the workspace owner created by `auth:setup`. Password entry is hidden; no default owner or password is provided. On Windows, `npm.cmd` avoids PowerShell execution-policy restrictions on `npm.ps1`. PostgreSQL setup differs as described below.
 
 ```powershell
 npm.cmd run dev  # SQLite collector + independent worker + checkout service
@@ -70,6 +71,11 @@ Only original captured traffic contributes to live metrics. Replays are stored s
 | POST | `/api/incidents/:id/resolve` | Resolve after successful fixed replay evidence |
 | POST | `/api/v1/events` | Authenticated, validated telemetry batch; returns 202 after durable enqueue |
 | GET | `/healthz` | Collector liveness |
+| GET | `/api/auth/status` | Public setup/session status; authenticated clients receive a CSRF token |
+| POST | `/api/auth/login` | Sign in with owner username and password; sets an HttpOnly session cookie |
+| POST | `/api/auth/logout` | Revoke the current session; requires session cookie and CSRF token |
+
+Dashboard reads, live updates, replay, resolution and fixture controls require an owner session. Their POST requests also require `X-CSRF-Token` from the session-status endpoint. `/healthz` and login assets remain public. The ingestion endpoint uses its own bearer key and does not accept a browser session as authorization.
 
 ## External service milestone (v0.2)
 
@@ -98,7 +104,7 @@ npm.cmd ci
 npm.cmd run dev:postgres
 ```
 
-This starts a real, development-only PostgreSQL server on loopback port **54329**, applies migrations, and launches the collector, ingestion worker and sample service as separate processes. Then run `npm.cmd run sample:traffic` in another terminal. The dashboard queue footer identifies `postgres` storage and `external` worker mode.
+This starts a real, development-only PostgreSQL server on loopback port **54329**, applies migrations, and launches the collector, ingestion worker and sample service as separate processes. On first launch, run `npm.cmd run auth:setup -- --local-postgres` in another terminal while the database is running, then sign in. Run `npm.cmd run sample:traffic` to generate events. The dashboard queue footer identifies `postgres` storage and `external` worker mode.
 
 The PostgreSQL cluster and generated database password stay in ignored `data/postgres/` and `data/postgres-local.json`. They are not printed or committed. Ctrl+C requests application shutdown before stopping the database; the cluster persists for the next launch. On Windows the embedded package stops PostgreSQL using process termination, so the next launch can perform normal crash recovery. Use a managed PostgreSQL service or normal PostgreSQL installation for durable deployments. `PG_DEV_PORT`, `PORT` and `SAMPLE_PORT` override local ports. No Docker installation is required for this development command. The embedded package is a devDependency; deployments install only `pg` and its dependencies.
 
@@ -111,6 +117,7 @@ Export a PostgreSQL connection string using your shell or secret manager, then r
 ```powershell
 # Set DATABASE_URL to your database connection string before these commands.
 npm.cmd run db:migrate
+npm.cmd run auth:setup
 $env:INCIDENTLAB_WORKER_MODE='external'
 npm.cmd start
 ```
@@ -135,7 +142,7 @@ PostgreSQL workers atomically claim rows with `FOR UPDATE SKIP LOCKED`. Multiple
 
 `Dockerfile` and `compose.yml` define PostgreSQL 17, a one-shot migration job, collector and independent worker. Set random **URI-safe** `POSTGRES_PASSWORD` and `INCIDENTLAB_INGESTION_KEY` values using your shell or a local ignored `.env`, then run `docker compose up --build`. The collector is published only on `127.0.0.1:4317`; PostgreSQL has no host-published port. The Node image installs production dependencies and runs as a non-root user. Add workers with `docker compose up --scale worker=2`. Compose is optional and was not run locally because Docker is not installed.
 
-This remains a local deployment template: the dashboard has no user authentication, and it should not be exposed publicly. The compose ingestion key must contain at least 24 characters. Back up the PostgreSQL volume before schema changes and do not delete it to perform routine upgrades.
+This remains a local deployment template. After startup, initialize the owner with `docker compose exec collector npm run auth:setup` in an interactive terminal. The compose ingestion key must contain at least 24 characters. Back up the PostgreSQL volume before schema changes and do not delete it to perform routine upgrades. Configure an HTTPS reverse proxy and the exact public origin before any non-local deployment; owner login alone does not make this a hardened multi-user service.
 
 ### Database verification
 
@@ -152,7 +159,7 @@ Alternatively set `TEST_DATABASE_URL` to an existing **test** database. The suit
 
 ## Boundaries
 
-This is a single-user **local prototype**, bound to `127.0.0.1`. Do not expose it publicly. The ingestion API uses a bearer key; dashboard reads and fixture controls have no user authentication or multi-tenant isolation. Mutation requests with a foreign Origin are rejected; this is not a substitute for production authentication. SDK payloads are explicitly opted in and redacted, but redaction is not a guarantee against every sensitive value. Replay cannot contact arbitrary URLs or charge a real payment provider.
+This is a single-workspace **local prototype**, bound to `127.0.0.1`. Owner sign-in protects the dashboard and controls; ingestion uses a separate bearer key. Multi-user invitations, workspace isolation and production deployment hardening are not implemented. SDK payloads are explicitly opted in and redacted, but redaction is not a guarantee against every sensitive value. Replay cannot contact arbitrary URLs or charge a real payment provider.
 
 The built-in investigation explanation is deterministic fixture documentation, **not AI output**. External SDK telemetry uses a durable local ingestion queue; distributed tracing and multi-tenant isolation are not implemented. External replay supports only the bundled checkout sample through the adapter described below. Other services require explicit, trusted adapters.
 
@@ -183,6 +190,42 @@ The collector allows one fixture/replay operation at a time; another request get
 
 Replay traffic does not enter ingestion, create incidents, or affect live request/error/latency metrics. UI tables show up to ten paired results while persisted records retain the selected request set. Tests cover contract rejection, input minimization, deadline/crash handling, cancellation, concurrency, baseline reproduction, candidate behavior, live-service isolation, history rendering helpers, and PostgreSQL persistence. The embedded Windows test database uses synchronous I/O to avoid orphaned asynchronous-I/O workers during test cleanup; normal PostgreSQL deployment settings are unchanged.
 
+## Owner authentication (v0.6)
+
+The existing workspace has one local owner. There is no public registration, seeded account, default password, OAuth connection or email service. Initialize the account from an interactive terminal:
+
+```powershell
+# SQLite: uses the default database, or the configured SQLITE_PATH.
+npm.cmd run auth:setup
+
+# Bundled PostgreSQL: start dev:postgres first; setup reads its ignored local configuration.
+npm.cmd run auth:setup -- --local-postgres
+```
+
+Use the same `DATABASE_URL` for setup with a managed PostgreSQL database. Usernames are normalized to lowercase and accept 3–64 letters/numbers/dots/underscores/hyphens. Passwords require 12–128 characters and are entered without terminal echo. Passwords are not accepted as CLI arguments, printed, committed, or stored in plaintext. The implementation uses salted scrypt (`N=32768,r=8,p=3`) and constant-time derived-key comparison, following the [OWASP password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+
+Sign in at `/login`. Each successful login generates a new random 256-bit session token, stored in an HttpOnly, SameSite=Strict cookie. Only its SHA-256 hash is stored in the database. Sessions expire after eight hours or thirty minutes without authenticated requests, and an account can have at most five active sessions. The dashboard keeps CSRF tokens only in page memory; protected POSTs require a session-bound `X-CSRF-Token`. Cross-origin browser mutations are rejected, and the live-update stream is revalidated and closed after logout or expiry. Telemetry bearer keys cannot read the dashboard, and owner sessions cannot authorize telemetry submission.
+
+Failed sign-ins are limited per account (5), socket IP (10) and collector database (100) within a fifteen-minute window; limits are shared across collectors. Successful sign-in clears its counters. The app returns the same invalid-credentials error for unknown users and wrong passwords, computes a dummy password hash for unknown users, and caps concurrent password verification at two operations per collector. Client-supplied forwarding headers are not trusted for IP limits. Deployment behind a proxy requires a separate review of proxy/rate-limit configuration.
+
+Local recovery is deliberately an administrator operation:
+
+```powershell
+npm.cmd run auth:password
+# For the bundled PostgreSQL database:
+npm.cmd run auth:password -- --local-postgres
+```
+
+Recovery prompts for the owner username and a new hidden password, then atomically revokes every existing session and clears sign-in throttles. Account-row checks prevent a concurrent login using the old hash from creating a new session after recovery. This command requires direct access to the database through the local machine/configuration; there is no unauthenticated web password-reset endpoint.
+
+For a TLS reverse proxy, set `INCIDENTLAB_PUBLIC_ORIGIN` to the exact HTTPS browser origin. HTTPS configuration enables `Secure` cookies with the `__Host-` prefix; the cookie has no Domain attribute and uses `Path=/`. HTTP public origins are accepted only for loopback hosts. `INCIDENTLAB_COOKIE_SECURE=1` also forces secure cookies, but browsers will not send them over ordinary HTTP. Forwarded headers do not silently change the trusted origin. Local HTTP uses a non-Secure host-only cookie to support loopback development. Session behavior follows the [OWASP session guidance](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+
+SQLite adds authentication tables without removing existing incidents. PostgreSQL requires `004_owner_auth.sql`. Migration `003_incident_analysis.sql` preserves the exact schema history reserved by the parked AI PR; including that schema does not enable AI features or make model requests. The PostgreSQL dev launcher migrates automatically; existing installations must run `db:migrate`. Old test harnesses explicitly opt out of auth only to test their original handlers; the executable collector always enables authentication and has no environment variable to disable it.
+
+Authentication tests cover access defaults, scrypt, cookie flags, CSRF, logout, expired/forged/duplicate sessions, throttle persistence, local recovery, live-stream revocation and restart persistence. Real PostgreSQL tests cover concurrent bootstrap, cross-collector sessions, shared throttles and authenticated HTTP workflows. The terminal setup command is also smoke-tested with an isolated disposable SQLite account. No real user account is created by automated tests.
+
+Docker Desktop validation passed on Windows using the Linux-container engine. The image builds and runs as a non-root user; the container regression suite passes 35 tests with the PostgreSQL-only suite skipped. The full PostgreSQL 17 Compose stack passes all 13 integration scenarios, authenticated owner setup/login/logout, CSRF enforcement, independent-worker ingestion, and owner/incident persistence after container recreation. Validation uses a separate disposable Compose project and volume. For coordinated restarts, use `docker compose down` followed by `docker compose up -d --wait` without deleting the database volume; restarting every role simultaneously does not wait for database readiness.
+
 ## Next milestones
 
 - [x] Separate sample service plus an ingestion SDK with payload redaction and authenticated ingestion.
@@ -192,7 +235,8 @@ Replay traffic does not enter ingestion, create incidents, or affect live reques
 - [ ] AI explanations grounded in captured evidence, with explicit uncertainty and cost limits.
 - [x] Isolated checkout-sample replay adapter, controlled fault injection, and paired latency measurements.
 - [ ] OS-level replay sandbox, durable replay jobs and additional trusted service adapters.
-- [ ] Dashboard authentication, workspaces, deployment, load tests, and a measured public demo.
+- [x] Owner authentication, session protection, local setup/recovery and shared login throttling.
+- [ ] Multi-user workspaces/roles, deployment hardening, load tests, and a measured public demo.
 
 ## Portfolio evidence
 
