@@ -224,7 +224,7 @@ SQLite adds authentication tables without removing existing incidents. PostgreSQ
 
 Authentication tests cover access defaults, scrypt, cookie flags, CSRF, logout, expired/forged/duplicate sessions, throttle persistence, local recovery, live-stream revocation and restart persistence. Real PostgreSQL tests cover concurrent bootstrap, cross-collector sessions, shared throttles and authenticated HTTP workflows. The terminal setup command is also smoke-tested with an isolated disposable SQLite account. No real user account is created by automated tests.
 
-Docker availability was checked on this Windows development host: no CLI on PATH, no standard Docker Desktop CLI installation, and no Docker service/backend were found. Docker Compose remains unexecuted locally; CI continues to test PostgreSQL using service containers.
+Docker Desktop validation passed on Windows using the Linux-container engine. The image builds and runs as a non-root user; the container regression suite passes 35 tests with the PostgreSQL-only suite skipped. The full PostgreSQL 17 Compose stack passes all 13 integration scenarios, authenticated owner setup/login/logout, CSRF enforcement, independent-worker ingestion, and owner/incident persistence after container recreation. Validation uses a separate disposable Compose project and volume. For coordinated restarts, use `docker compose down` followed by `docker compose up -d --wait` without deleting the database volume; restarting every role simultaneously does not wait for database readiness.
 
 ## Next milestones
 
